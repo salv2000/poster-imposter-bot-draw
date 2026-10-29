@@ -1,0 +1,61 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Bot Doodles</title>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<style>
+html,body{margin:0;background:#111;color:#eee;font-family:sans-serif;overscroll-behavior:none;touch-action:manipulation}
+#wrap{display:flex;flex-direction:column;align-items:center;height:100vh;height:100dvh;gap:4px;padding:4px;box-sizing:border-box}
+#blind{max-height:32vh;max-width:100%;object-fit:contain}
+#bar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:center}
+button{font-size:16px;padding:8px 12px;border-radius:8px;border:0;background:#333;color:#fff}
+button.on{background:#e0a020;color:#000}.big{font-size:20px;padding:10px 20px;background:#2a7}
+#sub{background:#c33}
+canvas{background:#fff;touch-action:none;flex:1;min-height:0;max-width:100%;aspect-ratio:5/7;object-fit:contain}
+#t{font-size:22px;font-weight:bold;min-width:50px}
+</style></head><body><div id="wrap">
+<div id="bar"><span id="lbl">…</span><span id="t">90</span></div>
+<img id="blind">
+<canvas id="c" width="500" height="700"></canvas>
+<div id="bar2" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center">
+<button data-w="6" class="on">Thin</button><button data-w="16">Thick</button><button data-w="32" data-e="1">Eraser</button>
+<button id="clr">Clear</button>
+<button id="go" class="big">Start ▶</button><button id="sub" class="big" disabled>Submit ✓</button>
+<button id="zip">Download all.zip</button>
+</div></div>
+<script>
+const c=document.getElementById('c'),x=c.getContext('2d');let ids=[],cur=-1,strokes=[],t0=0,run=false,timer,width=6,erase=false,s=null;
+const DUR=90000;
+document.addEventListener('gesturestart',e=>e.preventDefault());
+document.addEventListener('touchmove',e=>{if(e.touches.length>1)e.preventDefault()},{passive:false});
+const done=()=>JSON.parse(localStorage.getItem('bdDone')||'[]');
+// IndexedDB backup
+let db;const op=indexedDB.open('botdoodles',1);op.onupgradeneeded=()=>op.result.createObjectStore('d');op.onsuccess=()=>db=op.result;
+const put=(k,v)=>new Promise(r=>{const t=db.transaction('d','readwrite');t.objectStore('d').put(v,k);t.oncomplete=r});
+const all=()=>new Promise(r=>{const o={},t=db.transaction('d').objectStore('d').openCursor();t.onsuccess=e=>{const q=e.target.result;if(q){o[q.key]=q.value;q.continue()}else r(o)}});
+function blank(){x.fillStyle='#fff';x.fillRect(0,0,500,700)}
+function next(){const d=done();cur=ids.findIndex(i=>!d.includes(i));
+ if(cur<0){lbl.textContent='All 12 done! Tap Download all.zip';blind.src='';go.disabled=true;return}
+ lbl.textContent=`#${cur+1}/${ids.length} · ${ids[cur]}`;blind.src=`blinds/${ids[cur]}-blind.jpg`;blank();strokes=[];t.textContent='90';go.disabled=false;sub.disabled=true;run=false}
+fetch('bots.json').then(r=>r.json()).then(j=>{ids=j;next()});
+document.querySelectorAll('[data-w]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-w]').forEach(o=>o.classList.remove('on'));b.classList.add('on');width=+b.dataset.w;erase=!!b.dataset.e});
+clr.onclick=()=>{if(!run)return;blank();strokes.push({clear:true,t:Math.round(performance.now()-t0)})};
+go.onclick=()=>{run=true;t0=performance.now();go.disabled=true;sub.disabled=false;
+ timer=setInterval(()=>{const r=DUR-(performance.now()-t0);t.textContent=Math.max(0,Math.ceil(r/1000));if(r<=0)finish(true)},200)};
+sub.onclick=()=>finish(false);
+function pos(e){const r=c.getBoundingClientRect();return[Math.round((e.clientX-r.left)*500/r.width),Math.round((e.clientY-r.top)*700/r.height)]}
+c.onpointerdown=e=>{if(!run)return;c.setPointerCapture(e.pointerId);const[px,py]=pos(e);s={w:width,erase,pts:[[Math.round(performance.now()-t0),px,py]]};strokes.push(s);dot(px,py)};
+c.onpointermove=e=>{if(!run||!s)return;const[px,py]=pos(e);const l=s.pts[s.pts.length-1];s.pts.push([Math.round(performance.now()-t0),px,py]);
+ x.strokeStyle=s.erase?'#fff':'#000';x.lineWidth=s.w;x.lineCap=x.lineJoin='round';x.beginPath();x.moveTo(l[1],l[2]);x.lineTo(px,py);x.stroke()};
+c.onpointerup=c.onpointercancel=()=>s=null;
+function dot(px,py){x.fillStyle=erase?'#fff':'#000';x.beginPath();x.arc(px,py,width/2,0,7);x.fill()}
+function dl(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000)}
+async function finish(ended){if(!run)return;run=false;clearInterval(timer);s=null;const id=ids[cur];
+ const dur=Math.min(DUR,Math.round(performance.now()-t0));
+ const js={id,w:500,h:700,duration_ms:dur,ended:ended?'timer':'submit',strokes};
+ const png=await new Promise(r=>c.toBlob(r,'image/png'));const jb=new Blob([JSON.stringify(js)],{type:'application/json'});
+ if(db)await put(id,{png,json:JSON.stringify(js)});
+ dl(png,id+'.png');setTimeout(()=>dl(jb,id+'.strokes.json'),600);
+ const d=done();d.push(id);localStorage.setItem('bdDone',JSON.stringify(d));setTimeout(next,1200)}
+zip.onclick=async()=>{const o=await all(),z=new JSZip();for(const k in o){z.file(k+'.png',o[k].png);z.file(k+'.strokes.json',o[k].json)}
+ dl(await z.generateAsync({type:'blob'}),'bot-doodles.zip')};
+</script></body></html>
